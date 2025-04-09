@@ -1,0 +1,7 @@
+flask
+pyyaml
+openai
+Pillow
+imagehash
+tqdm
+ffmpeg-python
