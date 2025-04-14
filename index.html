@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Video Audio Product Detection</title>
+</head>
+<body>
+  <h2>Product Detection from Video Audio</h2>
+
+  <!-- Video Player -->
+  <video id="video" width="640" controls>
+    <source src="clip.mp4" type="video/mp4" />
+    Your browser does not support the video tag.
+  </video>
+
+  <br><br>
+  <button id="recordBtn">🎙️ Record Audio Snippet from Video</button>
+  <p id="ocrOutput">Transcript: <i>Nothing yet</i></p>
+
+  <script>
+    const recordBtn = document.getElementById("recordBtn");
+    const ocrOutput = document.getElementById("ocrOutput");
+    const video = document.getElementById("video");
+
+    let mediaRecorder;
+    let audioChunks = [];
+
+    // Setup AudioContext and connect the video element
+    const audioCtx = new AudioContext();
+    const source = audioCtx.createMediaElementSource(video);
+    const destination = audioCtx.createMediaStreamDestination();
+    source.connect(audioCtx.destination);      // still play audio out loud
+    source.connect(destination);               // also capture it into a stream
+
+    recordBtn.addEventListener("click", async () => {
+      await audioCtx.resume();  // required after user interaction
+
+      audioChunks = [];
+
+      mediaRecorder = new MediaRecorder(destination.stream);
+      mediaRecorder.ondataavailable = event => {
+        if (event.data.size > 0) audioChunks.push(event.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(audioChunks, { type: "audio/webm" });
+
+        const formData = new FormData();
+        formData.append("audio", blob, "video_audio.webm");
+
+        try {
+          const response = await fetch("/api/search/audio", {
+            method: "POST",
+            body: formData
+          });
+
+          const data = await response.json();
+          console.log("API Response:", data);
+          ocrOutput.innerText = `Transcript: ${data.transcript || "[no text found]"}`;
+        } catch (err) {
+          console.error("Error sending audio to backend:", err);
+        }
+      };
+
+      mediaRecorder.start();
+      recordBtn.disabled = true;
+      recordBtn.innerText = "⏳ Recording from video (5 sec)...";
+
+      setTimeout(() => {
+        mediaRecorder.stop();
+        recordBtn.disabled = false;
+        recordBtn.innerText = "🎙️ Record Audio Snippet from Video";
+      }, 5000);
+    });
+  </script>
+</body>
+</html>
