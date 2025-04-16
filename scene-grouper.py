@@ -1,176 +1,117 @@
+from typing import List, Tuple
 import os
 import json
-from typing import List
-from dataclasses import dataclass, field, asdict
-from datetime import timedelta
+import cv2
+import numpy as np
 from PIL import Image
+from tqdm import tqdm
 import imagehash
 
-@dataclass
-class Frame:
-    filename: str
-    timestamp: float  # seconds
-    hash: str
+# Configuration
+FRAME_DIR = "./output_frames"
+OUTPUT_MANIFEST = "scene_manifest.json"
+MOVIE_NAME = "clip.mp4"
+GRID_SIZE = 5
+PHASH_THRESHOLD = 8
+RGB_THRESHOLD = 1000
+GROUPING_STRATEGY = "rgb"  # or "phash"
 
-@dataclass
-class FrameGroup:
-    id: str
-    frames: List[Frame] = field(default_factory=list)
+def compute_phash(image_path: str) -> str:
+    return str(imagehash.phash(Image.open(image_path)))
 
-    def sort_frames(self):
-        self.frames.sort(key=lambda f: f.timestamp)
+def compute_rgb_grid(image_path: str, grid_size: int = GRID_SIZE):
+    img = cv2.imread(image_path)
+    h, w, _ = img.shape
+    grid = {}
+    dh, dw = h // grid_size, w // grid_size
+    for i in range(grid_size):
+        for j in range(grid_size):
+            cell = img[i*dh:(i+1)*dh, j*dw:(j+1)*dw]
+            mean_color = tuple(map(int, np.mean(cell.reshape(-1, 3), axis=0)))
+            grid[f"{i},{j}"] = mean_color
+    return grid
 
-    @property
-    def start_time(self):
-        return self.frames[0].timestamp if self.frames else None
+def rgb_distance(grid1: dict, grid2: dict) -> float:
+    dist = 0
+    for key in grid1:
+        r1, g1, b1 = grid1[key]
+        r2, g2, b2 = grid2[key]
+        dist += (r1 - r2)**2 + (g1 - g2)**2 + (b1 - b2)**2
+    return dist
 
-    @property
-    def end_time(self):
-        return self.frames[-1].timestamp if self.frames else None
+def hamming_distance(hash1: str, hash2: str) -> int:
+    return bin(int(hash1, 16) ^ int(hash2, 16)).count('1')
 
-@dataclass
-class Scene:
-    id: str
-    groups: List[FrameGroup] = field(default_factory=list)
+def parse_timestamp(filename: str) -> float:
+    parts = filename.replace(".jpg", "").split("_")
+    h, m, s, ms = map(int, parts)
+    return h * 3600 + m * 60 + s + ms / 1000
 
-    @property
-    def start_time(self):
-        return self.groups[0].start_time if self.groups else None
-
-    @property
-    def end_time(self):
-        return max(group.end_time for group in self.groups) if self.groups else None
-
-@dataclass
-class GroupOutput:
-    timestamp: float
-    frames: List[str]
-
-@dataclass
-class SceneOutput:
-    timestamp: float
-    groups: List[GroupOutput] = field(default_factory=list)
-
-@dataclass
-class SceneManifest:
-    scenes: List[SceneOutput] = field(default_factory=list)
-
-def compute_phash(image_path):
-    image = Image.open(image_path)
-    return str(imagehash.phash(image))
-
-def load_frames_from_directory(directory: str) -> List[Frame]:
-    frames = []
-    for filename in sorted(os.listdir(directory)):
-        if filename.endswith('.jpg') or filename.endswith('.png'):
-            timestamp = float(filename.split('_')[1].replace('.jpg', '').replace('.png', ''))
-            path = os.path.join(directory, filename)
-            phash = compute_phash(path)
-            frames.append(Frame(filename=filename, timestamp=timestamp, hash=phash))
-    return frames
-
-def hamming_distance(hash1, hash2):
-    return bin(int(str(hash1), 16) ^ int(str(hash2), 16)).count('1')
-
-def group_by_phash_similarity(frames: List[Frame], threshold: int = 6) -> List[FrameGroup]:
+def group_frames(strategy: str):
+    frame_files = sorted(f for f in os.listdir(FRAME_DIR) if f.endswith(".jpg"))
     groups = []
-    assigned = set()
-    for i, frame in enumerate(frames):
-        if frame.filename in assigned:
-            continue
-        group = FrameGroup(id=f"group_{frame.timestamp}", frames=[frame])
-        assigned.add(frame.filename)
-        for other in frames[i+1:]:
-            if other.filename in assigned:
-                continue
-            if hamming_distance(frame.hash, other.hash) <= threshold:
-                group.frames.append(other)
-                assigned.add(other.filename)
-        group.sort_frames()
-        groups.append(group)
+    current_group = []
+    last_feature = None
+
+    for f in tqdm(frame_files, desc=f"Grouping frames using {strategy}"):
+        path = os.path.join(FRAME_DIR, f)
+
+        if strategy == "phash":
+            feature = compute_phash(path)
+            distance_fn = hamming_distance
+            threshold = PHASH_THRESHOLD
+        elif strategy == "rgb":
+            feature = compute_rgb_grid(path)
+            distance_fn = rgb_distance
+            threshold = RGB_THRESHOLD
+        else:
+            raise ValueError("Unsupported strategy")
+
+        if last_feature is None:
+            current_group = [(f, feature)]
+        else:
+            dist = distance_fn(feature, last_feature)
+            if dist <= threshold:
+                current_group.append((f, feature))
+            else:
+                groups.append(current_group)
+                current_group = [(f, feature)]
+
+        last_feature = feature
+
+    if current_group:
+        groups.append(current_group)
+
     return groups
 
-def filter_small_groups(groups: List[FrameGroup], min_group_size: int = 2) -> List[FrameGroup]:
-    return [g for g in groups if len(g.frames) >= min_group_size]
+def save_manifest(groups: List[List[Tuple[str, any]]], strategy: str):
+    scene_manifest = {"movie_name": MOVIE_NAME, "scenes": []}
 
-def split_groups_by_time_gap(groups: List[FrameGroup], max_gap: float = 1.0, min_group_size: int = 2) -> List[FrameGroup]:
-    result = []
     for group in groups:
-        if len(group.frames) < 2:
-            result.append(group)
-            continue
-        group.sort_frames()
-        current = [group.frames[0]]
-        for i in range(1, len(group.frames)):
-            if group.frames[i].timestamp - group.frames[i - 1].timestamp > max_gap:
-                if len(current) >= min_group_size:
-                    new_group = FrameGroup(id=f"group_{current[0].timestamp}", frames=current.copy())
-                    new_group.sort_frames()
-                    result.append(new_group)
-                current = []
-            current.append(group.frames[i])
-        if len(current) >= min_group_size:
-            new_group = FrameGroup(id=f"group_{current[0].timestamp}", frames=current)
-            new_group.sort_frames()
-            result.append(new_group)
-    return result
+        frames = []
+        for f, feature in group:
+            frame_info = {
+                "frame": f,
+                "timestamp": parse_timestamp(f),
+                "movie_name": MOVIE_NAME,
+            }
+            if strategy == "phash":
+                frame_info["phash"] = feature
+            elif strategy == "rgb":
+                frame_info["rgb_grid"] = {k: list(v) for k, v in feature.items()}
 
-def merge_groups_into_scenes(groups: List[FrameGroup], max_scene_gap: float = 2.0) -> List[Scene]:
-    scenes = []
-    groups.sort(key=lambda g: g.start_time)
-    assigned = set()
-    for i, group in enumerate(groups):
-        if group.id in assigned:
-            continue
-        scene = Scene(id=f"scene_{group.start_time}", groups=[group])
-        assigned.add(group.id)
-        last_end = group.end_time
-        for j in range(i + 1, len(groups)):
-            if groups[j].id in assigned:
-                continue
-            if 0 <= groups[j].start_time - last_end <= max_scene_gap:
-                scene.groups.append(groups[j])
-                assigned.add(groups[j].id)
-                last_end = max(last_end, groups[j].end_time)
-        scenes.append(scene)
-    return scenes
+            frames.append(frame_info)
 
-def build_scene_manifest(scenes: List[Scene]) -> SceneManifest:
-    manifest = SceneManifest()
-    for scene in scenes:
-        scene_output = SceneOutput(timestamp=scene.start_time)
-        for group in scene.groups:
-            group_output = GroupOutput(
-                timestamp=group.start_time,
-                frames=[frame.filename for frame in group.frames]
-            )
-            scene_output.groups.append(group_output)
-        manifest.scenes.append(scene_output)
-    return manifest
+        scene_manifest["scenes"].append({
+            "timestamp": frames[0]["timestamp"],
+            "frames": frames
+        })
 
-def process_frames(directory: str, output_manifest_path: str):
-    print("Loading frames...")
-    frames = load_frames_from_directory(directory)
-    print(f"Loaded {len(frames)} frames.")
+    with open(OUTPUT_MANIFEST, "w") as f:
+        json.dump(scene_manifest, f, indent=2)
 
-    print("Grouping by pHash similarity...")
-    initial_groups = group_by_phash_similarity(frames)
-    print(f"Initial groups: {len(initial_groups)}")
+    print(f"Saved manifest with {len(groups)} groups to {OUTPUT_MANIFEST}")
 
-    filtered_groups = filter_small_groups(initial_groups)
-    print(f"Filtered groups: {len(filtered_groups)}")
-
-    split_groups = split_groups_by_time_gap(filtered_groups)
-    print(f"Split groups: {len(split_groups)}")
-
-    scenes = merge_groups_into_scenes(split_groups)
-    print(f"Total scenes: {len(scenes)}")
-
-    print("Writing scene manifest...")
-    manifest = build_scene_manifest(scenes)
-    with open(output_manifest_path, 'w') as f:
-        json.dump(asdict(manifest), f, indent=2)
-    print(f"Manifest written to {output_manifest_path}")
-
-if __name__ == '__main__':
-    process_frames('./output_frames', './scene_manifest.json')
+if __name__ == "__main__":
+    grouped = group_frames(GROUPING_STRATEGY)
+    save_manifest(grouped, GROUPING_STRATEGY)
