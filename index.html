@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Video Audio Product Detection</title>
+  <title>Video Frame Matching</title>
 </head>
 <body>
-  <h2>Product Detection from Video Audio</h2>
+  <h2>🎬 Frame RGB Grid Matching</h2>
 
   <!-- Video Player -->
   <video id="video" width="640" controls>
@@ -14,64 +14,64 @@
   </video>
 
   <br><br>
-  <button id="recordBtn">🎙️ Record Audio Snippet from Video</button>
-  <p id="ocrOutput">Transcript: <i>Nothing yet</i></p>
+  <button onclick="captureFrameAndSend()">📸 Capture Frame</button>
 
   <script>
-    const recordBtn = document.getElementById("recordBtn");
-    const ocrOutput = document.getElementById("ocrOutput");
-    const video = document.getElementById("video");
+    function downsampleTo5x5(imageData) {
+      const { data, width, height } = imageData;
+      const stepX = Math.floor(width / 5);
+      const stepY = Math.floor(height / 5);
+      const result = {};
 
-    let mediaRecorder;
-    let audioChunks = [];
+      for (let y = 0; y < 5; y++) {
+        for (let x = 0; x < 5; x++) {
+          let r = 0, g = 0, b = 0, count = 0;
 
-    // Setup AudioContext and connect the video element
-    const audioCtx = new AudioContext();
-    const source = audioCtx.createMediaElementSource(video);
-    const destination = audioCtx.createMediaStreamDestination();
-    source.connect(audioCtx.destination);      // still play audio out loud
-    source.connect(destination);               // also capture it into a stream
+          for (let dy = 0; dy < stepY; dy++) {
+            for (let dx = 0; dx < stepX; dx++) {
+              const px = (y * stepY + dy) * width + (x * stepX + dx);
+              r += data[px * 4];
+              g += data[px * 4 + 1];
+              b += data[px * 4 + 2];
+              count++;
+            }
+          }
 
-    recordBtn.addEventListener("click", async () => {
-      await audioCtx.resume();  // required after user interaction
-
-      audioChunks = [];
-
-      mediaRecorder = new MediaRecorder(destination.stream);
-      mediaRecorder.ondataavailable = event => {
-        if (event.data.size > 0) audioChunks.push(event.data);
-      };
-
-      mediaRecorder.onstop = async () => {
-        const blob = new Blob(audioChunks, { type: "audio/webm" });
-
-        const formData = new FormData();
-        formData.append("audio", blob, "video_audio.webm");
-
-        try {
-          const response = await fetch("/api/search/audio", {
-            method: "POST",
-            body: formData
-          });
-
-          const data = await response.json();
-          console.log("API Response:", data);
-          ocrOutput.innerText = `Transcript: ${data.transcript || "[no text found]"}`;
-        } catch (err) {
-          console.error("Error sending audio to backend:", err);
+          const key = `${x},${y}`;
+          result[key] = [
+            Math.round(r / count),
+            Math.round(g / count),
+            Math.round(b / count)
+          ];
         }
-      };
+      }
 
-      mediaRecorder.start();
-      recordBtn.disabled = true;
-      recordBtn.innerText = "⏳ Recording from video (5 sec)...";
+      return result;
+    }
 
-      setTimeout(() => {
-        mediaRecorder.stop();
-        recordBtn.disabled = false;
-        recordBtn.innerText = "🎙️ Record Audio Snippet from Video";
-      }, 5000);
-    });
+    function captureFrameAndSend() {
+      const video = document.getElementById("video");
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const rgbGrid = downsampleTo5x5(imageData);
+
+      fetch("/api/search/frame", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rgb_grid: rgbGrid })
+      })
+        .then(res => res.json())
+        .then(data => {
+          console.log("Frame Match Result:", data);
+          alert("Identified Movie: " + data.movie_name);
+        })
+        .catch(err => console.error("Error:", err));
+    }
   </script>
 </body>
 </html>
