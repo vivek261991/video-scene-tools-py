@@ -7,7 +7,6 @@ import uuid
 import os
 import numpy as np
 
-
 product_bp = Blueprint("product", __name__)
 
 # Load scene_products.json and scene manifest once at startup
@@ -66,11 +65,11 @@ def search_products_for_time_range():
 
 @product_bp.route("/api/search/audio", methods=["POST"])
 def search_by_audio():
-    if "audio" not in request.files:
+    if "file" not in request.files:
         print("no audio")
         return jsonify({"error": "No audio file provided"}), 400
 
-    audio = request.files["audio"]
+    audio = request.files["file"]
     filename = f"{uuid.uuid4()}.webm"
     filepath = os.path.join(AUDIO_UPLOAD_DIR, filename)
     audio.save(filepath)

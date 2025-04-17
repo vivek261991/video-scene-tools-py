@@ -2,21 +2,111 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Video Frame Matching</title>
+  <title>ACR A/B Detection Tool</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f8f9fa;
+      margin: 0;
+      padding: 0;
+    }
+
+    header {
+      background-color: #343a40;
+      color: white;
+      padding: 1rem 2rem;
+      font-size: 1.5rem;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: row;
+      padding: 2rem;
+      gap: 2rem;
+    }
+
+    .left-panel, .right-panel {
+      flex: 1;
+      background: white;
+      padding: 1.5rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    video {
+      width: 100%;
+      border-radius: 4px;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      padding: 0.6rem 1.2rem;
+      font-size: 1rem;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    .section-title {
+      font-size: 1.2rem;
+      font-weight: bold;
+      margin-top: 1rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .result-box {
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      padding: 1rem;
+      background: #f1f3f5;
+      min-height: 100px;
+      white-space: pre-line;
+    }
+  </style>
 </head>
 <body>
-  <h2>🎬 Frame RGB Grid Matching</h2>
+  <header>
+    🎬 ACR Detection — A/B Platform Tool
+  </header>
 
-  <!-- Video Player -->
-  <video id="video" width="640" controls>
-    <source src="clip.mp4" type="video/mp4" />
-    Your browser does not support the video tag.
-  </video>
+  <div class="container">
+    <!-- LEFT: Video + Controls -->
+    <div class="left-panel">
+      <video id="video" controls>
+        <source src="clip.mp4" type="video/mp4" />
+        Your browser does not support the video tag.
+      </video>
 
-  <br><br>
-  <button onclick="captureFrameAndSend()">📸 Capture Frame</button>
+      <div class="section-title">Detection Options</div>
+      <div class="button-group">
+        <button onclick="captureFrameAndSend()">🅰️ Detect by Frame</button>
+        <button onclick="recordAudioFromVideo()">🅱️ Detect by Audio</button>
+      </div>
+    </div>
+
+    <!-- RIGHT: Results -->
+    <div class="right-panel">
+      <div class="section-title">Match Result</div>
+      <div id="resultBox" class="result-box">Click a button to begin A/B detection...</div>
+    </div>
+  </div>
 
   <script>
+    const resultBox = document.getElementById("resultBox");
+    const video = document.getElementById("video");
+
+    // ========== FRAME MATCHING ==========
     function downsampleTo5x5(imageData) {
       const { data, width, height } = imageData;
       const stepX = Math.floor(width / 5);
@@ -50,7 +140,6 @@
     }
 
     function captureFrameAndSend() {
-      const video = document.getElementById("video");
       const canvas = document.createElement("canvas");
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -68,9 +157,61 @@
         .then(res => res.json())
         .then(data => {
           console.log("Frame Match Result:", data);
-          alert("Identified Movie: " + data.movie_name);
+          resultBox.innerText =
+            "🅰️ FRAME MATCH:\n" +
+            "🎥 Movie: " + data.movie_name + "\n🕒 Scene Timestamp: " + data.scene_timestamp;
         })
-        .catch(err => console.error("Error:", err));
+        .catch(err => {
+          console.error("Frame Match Error:", err);
+          resultBox.innerText = "❌ Frame detection failed.";
+        });
+    }
+
+    // ========== AUDIO MATCHING ==========
+    const audioCtx = new AudioContext();
+    const source = audioCtx.createMediaElementSource(video);
+    const destination = audioCtx.createMediaStreamDestination();
+
+    source.connect(audioCtx.destination); // Keep sound
+    source.connect(destination);          // For recording
+
+    async function recordAudioFromVideo() {
+      await audioCtx.resume();
+
+      const mediaRecorder = new MediaRecorder(destination.stream);
+      const chunks = [];
+
+      mediaRecorder.ondataavailable = event => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(chunks, { type: "audio/webm" });
+        const formData = new FormData();
+        formData.append("file", blob, "video_audio.webm");
+
+        try {
+          const response = await fetch("/api/search/audio", {
+            method: "POST",
+            body: formData
+          });
+
+          const data = await response.json();
+          console.log("Audio Match Result:", data);
+          resultBox.innerText =
+            "🅱️ AUDIO MATCH:\n" +
+            "🎥 Movie: " + data.movie_name + "\n📝 Transcript: " + data.transcript;
+        } catch (err) {
+          console.error("Audio Search Error:", err);
+          resultBox.innerText = "❌ Audio detection failed.";
+        }
+      };
+
+      mediaRecorder.start();
+      resultBox.innerText = "🔊 Recording from video for 5 seconds...";
+      setTimeout(() => {
+        mediaRecorder.stop();
+      }, 5000);
     }
   </script>
 </body>
