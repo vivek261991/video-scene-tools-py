@@ -63,6 +63,10 @@ def search_products_for_time_range():
     else:
         return jsonify({"message": "No matching products found for the given time range."}), 404
 
+AUDIO_UPLOAD_DIR = "uploads"
+os.makedirs(AUDIO_UPLOAD_DIR, exist_ok=True)
+
+whisper_model = whisper.load_model("base")
 @product_bp.route("/api/search/audio", methods=["POST"])
 def search_by_audio():
     if "file" not in request.files:

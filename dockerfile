@@ -12,7 +12,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-
+739884bb60c9
 RUN mkdir -p /app/uploads
 
 EXPOSE 5000

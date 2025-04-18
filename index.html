@@ -40,22 +40,29 @@
 
     .button-group {
       display: flex;
+      align-items: center;
       gap: 1rem;
       margin-top: 1rem;
     }
 
-    button {
+    button, select {
       background-color: #007bff;
       color: white;
       border: none;
-      padding: 0.6rem 1.2rem;
+      padding: 0.6rem 1rem;
       font-size: 1rem;
       border-radius: 5px;
       cursor: pointer;
     }
 
-    button:hover {
+    button:hover, select:hover {
       background-color: #0056b3;
+    }
+
+    select {
+      background-color: #007bff;
+      color: white;
+      border-radius: 5px;
     }
 
     .section-title {
@@ -84,12 +91,17 @@
     <!-- LEFT: Video + Controls -->
     <div class="left-panel">
       <video id="video" controls>
-        <source src="clip.mp4" type="video/mp4" />
+        <source src="Flight Risk.mp4" type="video/mp4" />
         Your browser does not support the video tag.
       </video>
 
       <div class="section-title">Detection Options</div>
       <div class="button-group">
+        <select id="gridSizeSelect">
+          <option value="5" selected>Grid: 5×5</option>
+          <option value="3">Grid: 3×3</option>
+          <option value="10">Grid: 10×10</option>
+        </select>
         <button onclick="captureFrameAndSend()">🅰️ Detect by Frame</button>
         <button onclick="recordAudioFromVideo()">🅱️ Detect by Audio</button>
       </div>
@@ -106,15 +118,15 @@
     const resultBox = document.getElementById("resultBox");
     const video = document.getElementById("video");
 
-    // ========== FRAME MATCHING ==========
-    function downsampleTo5x5(imageData) {
+    // Flexible RGB grid downsampling
+    function downsampleToNxN(imageData, gridSize) {
       const { data, width, height } = imageData;
-      const stepX = Math.floor(width / 5);
-      const stepY = Math.floor(height / 5);
+      const stepX = Math.floor(width / gridSize);
+      const stepY = Math.floor(height / gridSize);
       const result = {};
 
-      for (let y = 0; y < 5; y++) {
-        for (let x = 0; x < 5; x++) {
+      for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
           let r = 0, g = 0, b = 0, count = 0;
 
           for (let dy = 0; dy < stepY; dy++) {
@@ -140,6 +152,7 @@
     }
 
     function captureFrameAndSend() {
+      const gridSize = parseInt(document.getElementById("gridSizeSelect").value);
       const canvas = document.createElement("canvas");
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -147,7 +160,7 @@
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const rgbGrid = downsampleTo5x5(imageData);
+      const rgbGrid = downsampleToNxN(imageData, gridSize);
 
       fetch("/api/search/frame", {
         method: "POST",
@@ -167,17 +180,15 @@
         });
     }
 
-    // ========== AUDIO MATCHING ==========
+    // AUDIO MATCHING
     const audioCtx = new AudioContext();
     const source = audioCtx.createMediaElementSource(video);
     const destination = audioCtx.createMediaStreamDestination();
-
-    source.connect(audioCtx.destination); // Keep sound
-    source.connect(destination);          // For recording
+    source.connect(audioCtx.destination);
+    source.connect(destination);
 
     async function recordAudioFromVideo() {
       await audioCtx.resume();
-
       const mediaRecorder = new MediaRecorder(destination.stream);
       const chunks = [];
 

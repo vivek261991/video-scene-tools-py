@@ -17,14 +17,12 @@ def get_representative_frame(frames: list[str]) -> str:
     return frames[len(frames) // 2]
 
 def extract_frame_names_from_scene(scene):
-    # Handles legacy 'groups' or flat 'frames' structure
     if "groups" in scene:
         return [
             {"timestamp": group.get("timestamp", scene["timestamp"]), "frames": group["frames"]}
             for group in scene["groups"]
         ]
     elif "frames" in scene:
-        # flat format: scene contains list of frame objects
         flat_frames = [f["frame"] for f in scene["frames"]]
         return [{"timestamp": scene["timestamp"], "frames": flat_frames}]
     else:
@@ -35,18 +33,24 @@ def detect_products_for_manifest():
     enriched_manifest = {"scenes": []}
 
     for scene in tqdm(manifest["scenes"], desc="Processing scenes"):
-        enriched_scene = {"timestamp": scene["timestamp"], "groups": []}
+        movie_name = scene.get("movie_name", "unknown")
+        enriched_scene = {
+            "timestamp": scene["timestamp"],
+            "movie_name": movie_name,
+            "groups": []
+        }
 
         group_infos = extract_frame_names_from_scene(scene)
 
         for group in group_infos:
             frame_files = group["frames"]
             representative = get_representative_frame(frame_files)
-            full_path = os.path.join(FRAME_DIR, representative)
+            full_path = os.path.join(FRAME_DIR, movie_name, representative)
 
             if os.path.exists(full_path):
                 try:
-                    result = detect_products_in_image(full_path)
+                    #result = detect_products_in_image(full_path)
+                    result = []
                     if isinstance(result, str):
                         try:
                             parsed_result = json.loads(result)

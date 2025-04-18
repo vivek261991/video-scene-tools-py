@@ -9,9 +9,13 @@ app.register_blueprint(product_bp)
 def index():
     return send_file("index.html")
 
-@app.route("/clip.mp4")
-def serve_clip():
-    return send_file("clip.mp4")
+@app.route("/Flight Risk.mp4")
+def serve_flight_clip():
+    return send_file("videos/Flight Risk.mp4")
+
+@app.route("/Friends.mp4")
+def serve_friends():
+    return send_file("videos/Friends.mp4")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

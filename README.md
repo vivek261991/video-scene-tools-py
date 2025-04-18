@@ -5,6 +5,7 @@ Pre-Process:
 docker run -it product-api-ocr bash
 docker run -it my-acr bash
 python frame-extractor.py clip.mp4 --fps 1 -d output_frames/
+python frame-extractor.py videos/ --fps 1 -d output_frames/
 python scene-grouper.py 
 python detect_products_in_scenes.py
 

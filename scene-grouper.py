@@ -8,9 +8,8 @@ from tqdm import tqdm
 import imagehash
 
 # Configuration
-FRAME_DIR = "./output_frames"
+FRAME_ROOT_DIR = "./output_frames"
 OUTPUT_MANIFEST = "scene_manifest.json"
-MOVIE_NAME = "clip.mp4"
 GRID_SIZE = 5
 PHASH_THRESHOLD = 8
 RGB_THRESHOLD = 1000
@@ -47,14 +46,14 @@ def parse_timestamp(filename: str) -> float:
     h, m, s, ms = map(int, parts)
     return h * 3600 + m * 60 + s + ms / 1000
 
-def group_frames(strategy: str):
-    frame_files = sorted(f for f in os.listdir(FRAME_DIR) if f.endswith(".jpg"))
+def group_frames(frame_dir: str, strategy: str):
+    frame_files = sorted(f for f in os.listdir(frame_dir) if f.endswith(".jpg"))
     groups = []
     current_group = []
     last_feature = None
 
-    for f in tqdm(frame_files, desc=f"Grouping frames using {strategy}"):
-        path = os.path.join(FRAME_DIR, f)
+    for f in tqdm(frame_files, desc=f"Grouping frames in {frame_dir} using {strategy}"):
+        path = os.path.join(frame_dir, f)
 
         if strategy == "phash":
             feature = compute_phash(path)
@@ -84,34 +83,41 @@ def group_frames(strategy: str):
 
     return groups
 
-def save_manifest(groups: List[List[Tuple[str, any]]], strategy: str):
-    scene_manifest = {"movie_name": MOVIE_NAME, "scenes": []}
+def build_scene_manifest():
+    manifest = {"scenes": []}
 
-    for group in groups:
-        frames = []
-        for f, feature in group:
-            frame_info = {
-                "frame": f,
-                "timestamp": parse_timestamp(f),
-                "movie_name": MOVIE_NAME,
-            }
-            if strategy == "phash":
-                frame_info["phash"] = feature
-            elif strategy == "rgb":
-                frame_info["rgb_grid"] = {k: list(v) for k, v in feature.items()}
+    for movie_folder in sorted(os.listdir(FRAME_ROOT_DIR)):
+        frame_dir = os.path.join(FRAME_ROOT_DIR, movie_folder)
+        if not os.path.isdir(frame_dir):
+            continue
 
-            frames.append(frame_info)
+        print(f"\n🎞️ Processing: {movie_folder}")
+        groups = group_frames(frame_dir, GROUPING_STRATEGY)
 
-        scene_manifest["scenes"].append({
-            "timestamp": frames[0]["timestamp"],
-            "frames": frames
-        })
+        for group in groups:
+            frames = []
+            for f, feature in group:
+                frame_info = {
+                    "frame": f,
+                    "timestamp": parse_timestamp(f),
+                    "movie_name": movie_folder
+                }
+                if GROUPING_STRATEGY == "phash":
+                    frame_info["phash"] = feature
+                elif GROUPING_STRATEGY == "rgb":
+                    frame_info["rgb_grid"] = {k: list(v) for k, v in feature.items()}
+
+                frames.append(frame_info)
+
+            manifest["scenes"].append({
+                "timestamp": frames[0]["timestamp"],
+                "movie_name": movie_folder,
+                "frames": frames
+            })
 
     with open(OUTPUT_MANIFEST, "w") as f:
-        json.dump(scene_manifest, f, indent=2)
-
-    print(f"Saved manifest with {len(groups)} groups to {OUTPUT_MANIFEST}")
+        json.dump(manifest, f, indent=2)
+    print(f"\n✅ Saved manifest with {len(manifest['scenes'])} total scenes to {OUTPUT_MANIFEST}")
 
 if __name__ == "__main__":
-    grouped = group_frames(GROUPING_STRATEGY)
-    save_manifest(grouped, GROUPING_STRATEGY)
+    build_scene_manifest()

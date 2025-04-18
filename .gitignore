@@ -1,4 +1,5 @@
 output_frames/
+videos/
 clip.mp4
 __pycache__/
 config.yml
